@@ -5,71 +5,63 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Check if xrandr and cvt are installed
-if ! command_exists xrandr || ! command_exists cvt; then
-    echo "Error: 'xrandr' and/or 'cvt' are not installed."
-    read -p "Would you like to install them now? (y/n): " install_choice
+# Check if xrandr is installed
+if ! command_exists xrandr; then
+    echo "Error: 'xrandr' is not installed."
+    read -p "Would you like to install it now? (y/n): " install_choice
     if [[ "$install_choice" =~ ^[Yy]$ ]]; then
         sudo apt update && sudo apt install -y x11-xserver-utils
-        echo "'xrandr' and 'cvt' have been installed."
+        echo "'xrandr' has been installed."
     else
-        echo "Installation skipped. The script cannot continue without 'xrandr' and 'cvt'."
+        echo "Installation skipped. The script cannot continue without 'xrandr'."
         exit 1
     fi
 fi
 
-# Get the current primary display name
+# Get primary display information
 default_display=$(xrandr | grep " primary" | cut -d" " -f1)
 
-# Get available displays
-echo "Available displays:"
-xrandr | grep " connected" | awk '{print $1}'
-echo ""
+# Ask user how many virtual displays to create
+read -p "Enter the number of virtual displays to create: " num_displays
 
-# Ask user for the output display
-read -p "Enter the desired type/name for the secondary display (e.g., HDMI-1, DP-2, DVI-D-0): " secondary_display
-
-# Verify that the secondary display exists
-if ! xrandr | grep -q "^$secondary_display connected"; then
-    echo "Error: Display '$secondary_display' not found."
-    exit 1
-fi
-
-# Ask user for the resolution
-read -p "Enter the desired resolution (e.g., 1920x1080): " custom_resolution
-
-# Ask user for the refresh rate
+# Ask for resolution and refresh rate
+read -p "Enter the desired resolution for virtual displays (e.g., 1920x1080): " virtual_resolution
 read -p "Enter the refresh rate (e.g., 60): " refresh_rate
 
-# Check if the mode already exists
-if ! xrandr | grep -q "$custom_resolution"; then
-    # Generate modeline using cvt
-    modeline=$(cvt $(echo $custom_resolution | tr 'x' ' ') $refresh_rate | grep Modeline | cut -d ' ' -f2-)
-
-    # Add the new mode
-    xrandr --newmode $modeline
-    xrandr --addmode $secondary_display $custom_resolution
-fi
+# Extract width and height
+virtual_width=$(echo $virtual_resolution | cut -d"x" -f1)
+virtual_height=$(echo $virtual_resolution | cut -d"x" -f2)
 
 # Get the resolution of the primary display
-resolution=$(xrandr | grep "*" | awk '{print $1}')
-width=$(echo $resolution | cut -d"x" -f1)
-height=$(echo $resolution | cut -d"x" -f2)
+primary_resolution=$(xrandr | grep " primary" | awk '{print $4}')
+primary_width=$(echo $primary_resolution | cut -d'+' -f1 | cut -d'x' -f1)
+primary_height=$(echo $primary_resolution | cut -d'+' -f1 | cut -d'x' -f2)
 
-# Set the output mode for the secondary display and position it
-xrandr --output $secondary_display --mode $custom_resolution --right-of $default_display
+# Initialize total width
+total_width=$primary_width
+total_height=$primary_height
 
-# Calculate the new framebuffer size
-res_width=$(echo $custom_resolution | cut -d"x" -f1)
-res_height=$(echo $custom_resolution | cut -d"x" -f2)
+# Create virtual displays
+for i in $(seq 1 $num_displays); do
+    virtual_display="Virtual-$i"
 
-new_width=$(($width + $res_width))
-new_height=$((height > res_height ? height : res_height))
+    # Generate a new mode if it doesn't exist
+    if ! xrandr | grep -q "$virtual_resolution"; then
+        modeline=$(cvt $virtual_width $virtual_height $refresh_rate | grep Modeline | cut -d ' ' -f2-)
+        xrandr --newmode $modeline
+    fi
 
-# Configure the framebuffer (virtual screen size) to accommodate both monitors
-xrandr --fb ${new_width}x${new_height} --output $default_display --panning ${width}x${height}/${new_width}x${new_height}
+    # Add mode and configure the virtual monitor
+    xrandr --addmode $virtual_display $virtual_resolution
+    xrandr --setmonitor $virtual_display ${virtual_width}/64x${virtual_height}/48+${total_width}+0 none
+    xrandr --output $virtual_display --mode $virtual_resolution --right-of $default_display
 
-# Create a virtual monitor configuration
-xrandr --setmonitor virtual ${res_width}/64x${res_height}/48+${width}+0 none
+    # Update total width and height
+    total_width=$((total_width + virtual_width))
+    total_height=$((total_height > virtual_height ? total_height : virtual_height))
+done
 
-echo "Configuration applied successfully!"
+# Adjust the framebuffer size
+xrandr --fb ${total_width}x${total_height}
+
+echo "$num_displays virtual displays created successfully!"

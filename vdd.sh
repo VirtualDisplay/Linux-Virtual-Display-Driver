@@ -27,7 +27,7 @@ xrandr | grep " connected" | awk '{print $1}'
 echo ""
 
 # Ask user for the output display
-read -p "Enter the name of the secondary display (e.g., HDMI-1, DP-2, DVI-D-0): " secondary_display
+read -p "Enter the desired type/name for the secondary display (e.g., HDMI-1, DP-2, DVI-D-0): " secondary_display
 
 # Verify that the secondary display exists
 if ! xrandr | grep -q "^$secondary_display connected"; then
